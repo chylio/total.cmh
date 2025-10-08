@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智慧醫療專案經費預算儀表板</title>
+    <!-- 載入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 載入 Chart.js (用於視覺化圖表) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        /* 設定字體為 Inter (Tailwind 默認字體) */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f7f9;
+        }
+        .chart-container {
+            max-width: 100%;
+            height: 300px; /* 統一圖表高度 */
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div id="app" class="max-w-7xl mx-auto">
+        <header class="mb-8">
+            <h1 class="text-3xl font-bold text-gray-900 border-b-4 border-blue-500 pb-2">
+                智慧醫療專案經費總覽
+            </h1>
+            <p class="text-gray-500 mt-1">來自「經費通知.pptx」的互動式數據視覺化</p>
+        </header>
+
+        <!-- 總體關鍵指標 (KPIs) 區塊 -->
+        <div id="kpi-dashboard" class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <!-- 數據將由 JS 填充 -->
+        </div>
+
+        <!-- 主要圖表區塊 -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
+            <!-- 圖表 1: 總經費比例 (補助款 vs 配合款) -->
+            <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-lg hover:shadow-2xl transition duration-300">
+                <h2 class="text-xl font-semibold mb-4 text-gray-700">總體經費來源結構</h2>
+                <div class="chart-container flex justify-center">
+                    <canvas id="fundingChart"></canvas>
+                </div>
+                <p class="text-center text-sm text-gray-500 mt-4">（以設備費總額計算）</p>
+            </div>
+
+            <!-- 圖表 2: 各專案設備費比較 -->
+            <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-lg hover:shadow-2xl transition duration-300">
+                <h2 class="text-xl font-semibold mb-4 text-gray-700">各專案設備費總額比較</h2>
+                <div class="chart-container">
+                    <canvas id="projectCostChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- 專案詳細資料與互動區 -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- 專案列表 (可點擊) -->
+            <div class="lg:col-span-1">
+                <h2 class="text-xl font-semibold mb-4 text-gray-700">專案列表（點擊查看詳情）</h2>
+                <div id="projectList" class="space-y-4">
+                    <!-- 專案卡片將由 JS 填充 -->
+                </div>
+            </div>
+
+            <!-- 專案詳細資料 (互動顯示) -->
+            <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-lg border-l-4 border-blue-500" id="detailPanel">
+                <h2 class="text-2xl font-bold mb-4 text-blue-600" id="detailTitle">請點擊左側專案卡片查看詳情</h2>
+                <div id="detailContent">
+                    <p class="text-gray-500">點擊後，此處將顯示該專案的**設備費、業務費、人事費**等詳細費用構成和補助款/配合款的比例。</p>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // 核心數據結構 (整理自 .pptx 檔案內容)
+        const projectData = [
+            {
+                department: '藥劑部',
+                project: '管制藥智慧櫃與智慧調劑台',
+                color: '#3b82f6', // 藍色 (blue-500)
+                costs: [
+                    { category: '設備費', total: 36800000, subsidy: 27779151, matching: 9020849 },
+                    { category: '業務費', total: 0, subsidy: 0, matching: 0 },
+                    { category: '人事費', total: 0, subsidy: 0, matching: 0 }
+                ],
+            },
+            {
+                department: '醫療事務室',
+                project: '智慧住院排程與病床控管系統',
+                color: '#10b981', // 綠色 (emerald-500)
+                costs: [
+                    { category: '設備費', total: 1450000, subsidy: 942500, matching: 507500 },
+                    // 業務費和人事費的補助/配合款未明確標註，故將總額視為該項目的總支出
+                    { category: '業務費', total: 50000, subsidy: 50000, matching: 0 }, 
+                    { category: '人事費/其他', total: 800000, subsidy: 800000, matching: 0 }
+                ],
+            }
+        ];
+
+        // 將數字格式化為千分位
+        const formatNumber = (num) => {
+            return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        };
+
+        // 計算總計
+        let totalEquipmentCost = 0;
+        let totalSubsidy = 0;
+        let totalMatching = 0;
+
+        projectData.forEach(p => {
+            const equipment = p.costs.find(c => c.category === '設備費');
+            if (equipment) {
+                totalEquipmentCost += equipment.total;
+                totalSubsidy += equipment.subsidy;
+                totalMatching += equipment.matching;
+            }
+        });
+
+        // ----------------------------------------------------------------------
+        // 1. 渲染 KPIs (Key Performance Indicators)
+        // ----------------------------------------------------------------------
+
+        function renderKPIs() {
+            const kpiData = [
+                { label: '總設備費', value: totalEquipmentCost, color: 'bg-indigo-500', icon: 'M12 6v12m-6-6h12' },
+                { label: '總補助款', value: totalSubsidy, color: 'bg-blue-500', icon: 'M9 8h6m-5 0h1m-1 4h.01m-1.93 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
+                { label: '總配合款', value: totalMatching, color: 'bg-green-500', icon: 'M14 10h-2m2 0c.34-.32 1-.5 1-.5V7h-4v2c0 .5-.66.82-1 1' }
+            ];
+
+            const kpiDashboard = document.getElementById('kpi-dashboard');
+            kpiDashboard.innerHTML = kpiData.map(kpi => `
+                <div class="${kpi.color} text-white p-6 rounded-xl shadow-lg flex items-center justify-between">
+                    <div>
+                        <p class="text-sm opacity-70">${kpi.label} (以設備費計)</p>
+                        <p class="text-3xl font-extrabold mt-1">$${formatNumber(kpi.value)}</p>
+                    </div>
+                    <svg class="w-10 h-10 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${kpi.icon}"></path>
+                    </svg>
+                </div>
+            `).join('');
+        }
+
+
+        // ----------------------------------------------------------------------
+        // 2. 渲染圖表
+        // ----------------------------------------------------------------------
+
+        function renderCharts() {
+            // --- 2.1 總體經費來源結構 (圓環圖) ---
+            const fundingCtx = document.getElementById('fundingChart').getContext('2d');
+            new Chart(fundingCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['補助款', '配合款'],
+                    datasets: [{
+                        label: '經費來源',
+                        data: [totalSubsidy, totalMatching],
+                        backgroundColor: ['#2563eb', '#10b981'], // 藍色 (補助), 綠色 (配合)
+                        hoverOffset: 10
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                padding: 20
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const label = context.label || '';
+                                    const value = context.parsed;
+                                    const total = totalSubsidy + totalMatching;
+                                    const percentage = ((value / total) * 100).toFixed(1) + '%';
+                                    return `${label}: $${formatNumber(value)} (${percentage})`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // --- 2.2 各專案設備費總額比較 (長條圖) ---
+            const projectCostCtx = document.getElementById('projectCostChart').getContext('2d');
+            const projectLabels = projectData.map(p => p.department);
+            const projectCosts = projectData.map(p => p.costs.find(c => c.category === '設備費').total);
+            const projectColors = projectData.map(p => p.color);
+
+            new Chart(projectCostCtx, {
+                type: 'bar',
+                data: {
+                    labels: projectLabels,
+                    datasets: [{
+                        label: '設備費總額',
+                        data: projectCosts,
+                        backgroundColor: projectColors.map(c => c + 'cc'),
+                        borderColor: projectColors,
+                        borderWidth: 2,
+                        borderRadius: 8,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: '金額 (TWD)'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return `$${formatNumber(value / 10000)} 萬`;
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    label += `$${formatNumber(context.parsed.y)}`;
+                                    return label;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // ----------------------------------------------------------------------
+        // 3. 渲染專案列表與互動
+        // ----------------------------------------------------------------------
+
+        function renderProjectList() {
+            const projectList = document.getElementById('projectList');
+            projectList.innerHTML = projectData.map((p, index) => `
+                <div 
+                    class="project-card bg-white p-4 rounded-lg shadow cursor-pointer transition duration-300 border-l-4 hover:shadow-xl hover:bg-gray-50"
+                    style="border-color: ${p.color};"
+                    data-index="${index}"
+                    onclick="showProjectDetails(${index})"
+                >
+                    <p class="text-xs text-gray-500">${p.department}</p>
+                    <p class="text-lg font-semibold text-gray-800">${p.project}</p>
+                </div>
+            `).join('');
+            
+            // 預設顯示第一個專案的細節
+            if (projectData.length > 0) {
+                showProjectDetails(0);
+                document.querySelector('.project-card').classList.add('shadow-2xl', 'scale-105', 'bg-blue-50');
+            }
+        }
+
+        // 顯示專案詳細資料的函式
+        function showProjectDetails(index) {
+            const project = projectData[index];
+            const detailTitle = document.getElementById('detailTitle');
+            const detailContent = document.getElementById('detailContent');
+            const detailPanel = document.getElementById('detailPanel');
+
+            // 更新標題和邊框顏色
+            detailTitle.textContent = `${project.department} - ${project.project}`;
+            detailPanel.style.borderColor = project.color;
+
+            // 移除舊的 active 樣式
+            document.querySelectorAll('.project-card').forEach(card => {
+                card.classList.remove('shadow-2xl', 'scale-105', 'bg-blue-50', 'ring-2', 'ring-offset-2', 'ring-blue-500');
+            });
+
+            // 加入新的 active 樣式
+            document.querySelector(`.project-card[data-index="${index}"]`).classList.add('shadow-2xl', 'scale-105', 'bg-blue-50', 'ring-2', 'ring-offset-2', 'ring-blue-500');
+
+
+            // 產生詳細內容 HTML
+            const detailsHtml = `
+                <div class="space-y-6">
+                    ${project.costs.map(cost => {
+                        const total = cost.total;
+                        const subsidy = cost.subsidy;
+                        const matching = cost.matching;
+                        const subsidyPercent = total > 0 ? ((subsidy / total) * 100).toFixed(1) : 0;
+                        const matchingPercent = total > 0 ? ((matching / total) * 100).toFixed(1) : 0;
+
+                        return `
+                            <div class="border-b pb-4">
+                                <h3 class="text-xl font-bold text-gray-800 mb-2">${cost.category} <span class="text-base font-normal text-gray-500">（總額：$${formatNumber(total)}）</span></h3>
+                                
+                                <div class="grid grid-cols-2 gap-4 mt-2">
+                                    <div class="bg-gray-100 p-3 rounded-lg">
+                                        <p class="text-sm font-medium text-blue-600">補助款</p>
+                                        <p class="text-xl font-extrabold text-blue-600">$${formatNumber(subsidy)}</p>
+                                        <p class="text-xs text-gray-500">${subsidyPercent}%</p>
+                                    </div>
+                                    <div class="bg-gray-100 p-3 rounded-lg">
+                                        <p class="text-sm font-medium text-green-600">配合款</p>
+                                        <p class="text-xl font-extrabold text-green-600">$${formatNumber(matching)}</p>
+                                        <p class="text-xs text-gray-500">${matchingPercent}%</p>
+                                    </div>
+                                </div>
+                                ${total > 0 && cost.category === '設備費' ? `
+                                    <!-- 費用條 (Progress Bar) -->
+                                    <div class="w-full bg-gray-200 rounded-full h-2.5 mt-4">
+                                        <div class="h-2.5 rounded-l-full" style="width: ${subsidyPercent}%; background-color: #2563eb;"></div>
+                                    </div>
+                                    <div class="flex justify-between text-xs text-gray-600 mt-1">
+                                        <span>補助款</span>
+                                        <span>配合款</span>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            `;
+            detailContent.innerHTML = detailsHtml;
+        }
+
+        // 將 showProjectDetails 函式暴露給全域環境，以便 HTML 中的 onclick 使用
+        window.showProjectDetails = showProjectDetails;
+
+        // ----------------------------------------------------------------------
+        // 4. 應用程式啟動
+        // ----------------------------------------------------------------------
+
+        document.addEventListener('DOMContentLoaded', () => {
+            renderKPIs();
+            renderCharts();
+            renderProjectList();
+        });
+    </script>
+</body>
+</html>
